@@ -1,104 +1,67 @@
-name: CentOS7-Manual-SSH
+name: CentOS7-Botnet-Builder-Pro
 
 on:
   workflow_dispatch:
 
 jobs:
-  centos7:
+  setup-and-run:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: Start CentOS 7 Container
-        run: |
-          docker pull centos:7
-          docker run -d \
-            --name centos7 \
-            --privileged \
-            -p 1302:1302 \
-            -p 80:80 \
-            -p 443:443 \
-            -p 9473:9473 \
-            -p 69:69/udp \
-            -v ${{ github.workspace }}:/workspace \
-            --restart unless-stopped \
-            centos:7 /sbin/init
-          sleep 10
-
-      - name: 🔥 Fix CentOS 7 Repos (Vault Only)
-        run: |
-          docker exec centos7 bash -c '
-            rm -rf /etc/yum.repos.d/*.repo
-            echo "[base]" > /etc/yum.repos.d/CentOS-Vault.repo
-            echo "name=CentOS-7 - Base" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=https://vault.centos.org/7.9.2009/os/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "[updates]" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "name=CentOS-7 - Updates" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=https://vault.centos.org/7.9.2009/updates/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "[extras]" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "name=CentOS-7 - Extras" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=https://vault.centos.org/7.9.2009/extras/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgcheck=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "[epel]" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "name=Extra Packages for Enterprise Linux 7 - \$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "baseurl=https://download.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
-            echo "gpgcheck=0" >> /etc/yum.repos.d/CentOS-Vault.repo
-            yum clean all
-            rm -rf /var/cache/yum
-            yum makecache
-          '
-          echo "✅ CentOS 7 repos fixed."
-
-      - name: 📦 Install Basic Tools in Container
-        run: |
-          docker exec centos7 bash -c '
-            yum install -y epel-release
-            yum install -y curl wget git nano screen tar bzip2 gcc gcc-c++ make glibc-static gmp-devel
-          '
-
-      - name: 🚪 Install tmate on Runner
+      - name: 1. Update & Install Desktop (XFCE + XRDP)
         run: |
           sudo apt-get update
-          sudo apt-get install -y tmate
-          echo "✅ tmate installed"
-
-      - name: 🖥️ Start tmate SSH Session
+          sudo apt-get install -y xfce4 xfce4-goodies xrdp
+          sudo systemctl enable xrdp
+          sudo systemctl start xrdp
+          echo "xfce4-session" | sudo tee /etc/skel/.xsession
+          sudo sed -i '3 i echo "xfce4-session" > ~/.xsession' /etc/xrdp/startwm.sh
+      - name: 2. Create Login User
         run: |
-          tmate -F | tee /tmp/tmate.log &
-          sleep 5
-          TMATE_SSH=$(tmate display -p '#{tmate_ssh}' 2>/dev/null || echo "Waiting...")
-          echo "═══════════════════════════════════════════════════════════════"
-          echo "  ✅ SSH SESSION READY – COPY THIS COMMAND:"
-          echo ""
-          echo "  $TMATE_SSH"
-          echo ""
-          echo "  🔑 No password required – just paste into your terminal."
-          echo ""
-          echo "  📦 Once connected, enter the container with:"
-          echo "     docker exec -it centos7 bash"
-          echo ""
-          echo "  📁 Your repo files are in /workspace (if you checked out code)."
-          echo ""
-          echo "  ⚠️  The container will stay alive for 6 hours."
-          echo "═══════════════════════════════════════════════════════════════"
+          USER_NAME="linuxuser"
+          USER_PASS="mypassword123" 
+          sudo useradd -m -s /bin/bash $USER_NAME
+          echo "$USER_NAME:$USER_PASS" | sudo chpasswd
+          sudo usermod -aG sudo $USER_NAME
+          echo "USER_PASS=$USER_PASS" >> $GITHUB_ENV
+      - name: 3. Setup Tailscale
+        run: curl -fsSL https://tailscale.com/install.sh | sh
 
-      - name: ⏳ Keep Runner Alive (6 hours)
-        run: sleep 21600
-
-      - name: 🧹 Cleanup
-        if: always()
+      - name: 4. Connect to Tailscale
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          docker stop centos7 || true
-          docker rm centos7 || true
+          if [ -z "$TS_KEY" ]; then echo "ERROR: TAILSCALE_AUTH_KEY MISSING"; exit 1; fi
+          sudo tailscale up --authkey=$TS_KEY --hostname="botnet-builder" --ssh
+          echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+      - name: 5. Start CentOS 7 Docker Container & Fix Repos
+        run: |
+          docker run -d --name centos_c2 -it centos:7 /bin/bash
+          
+          # Fix the dead CentOS 7 mirrors by pointing to the Vault
+          docker exec centos_c2 sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-Base.repo
+          docker exec centos_c2 sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
+          
+          # Install build tools
+          docker exec centos_c2 yum update -y
+          docker exec centos_c2 yum install -y gcc screen make wget curl git python3 php
+          
+          echo "CentOS 7 is now fixed and running in the background."
+      - name: 6. Pre-install Ngrok on Host
+        run: |
+          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+          echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+          sudo apt update && sudo apt install ngrok -y
+      - name: 7. Display Final Info
+        run: |
+          echo "======================================================="
+          echo "IP ADDRESS : ${{ env.TS_IP }}"
+          echo "USERNAME   : linuxuser"
+          echo "PASSWORD   : ${{ env.USER_PASS }}"
+          echo "======================================================="
+          echo "TO START NGROK: Run 'ngrok http 80' in the RDP terminal"
+          echo "======================================================="
+      - name: 8. Keep Session Alive
+        run: |
+          while true; do sleep 60; done
