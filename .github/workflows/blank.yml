@@ -1,4 +1,4 @@
-name: CentOS7-Tailscale-Only
+name: CentOS7-Manual-SSH
 
 on:
   workflow_dispatch:
@@ -9,9 +9,6 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Start CentOS 7 Container
         run: |
           docker pull centos:7
@@ -28,13 +25,10 @@ jobs:
             centos:7 /sbin/init
           sleep 10
 
-      - name: 🔥 NUKE Broken Repos & Setup VAULT Only
+      - name: 🔥 Fix CentOS 7 Repos (Vault Only)
         run: |
           docker exec centos7 bash -c '
-            # Delete ALL existing repo files (they are broken)
             rm -rf /etc/yum.repos.d/*.repo
-
-            # Create fresh vault repo (NO mirrorlist.centos.org)
             echo "[base]" > /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Base" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=https://vault.centos.org/7.9.2009/os/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -42,7 +36,6 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[updates]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Updates" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=https://vault.centos.org/7.9.2009/updates/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -50,7 +43,6 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[extras]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Extras" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=https://vault.centos.org/7.9.2009/extras/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -58,68 +50,54 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[epel]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=Extra Packages for Enterprise Linux 7 - \$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=https://download.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=0" >> /etc/yum.repos.d/CentOS-Vault.repo
-
-            # Clean yum cache
             yum clean all
             rm -rf /var/cache/yum
-
-            # Test yum – should work now
-            yum repolist
+            yum makecache
           '
-          echo "✅ CentOS 7 repos fixed – vault.centos.org is now the only source."
+          echo "✅ CentOS 7 repos fixed."
 
-      - name: Install Tailscale
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      - name: 📦 Install Basic Tools in Container
         run: |
           docker exec centos7 bash -c '
-            curl -fsSL https://tailscale.com/install.sh | sh
-            systemctl enable tailscaled
-            systemctl start tailscaled || tailscaled 2>/dev/null &
-            sleep 5
-            tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname=centos7-builder --ssh
-            sleep 5
-            TS_IP=$(tailscale ip -4)
-            echo "TAILSCALE_IP=$TS_IP" >> /etc/environment
-            echo "✅ Tailscale connected – IP: $TS_IP"
+            yum install -y epel-release
+            yum install -y curl wget git nano screen tar bzip2 gcc gcc-c++ make glibc-static gmp-devel
           '
 
-      - name: Display Access Info
+      - name: 🚪 Install tmate on Runner
         run: |
-          TS_IP=$(docker exec centos7 tailscale ip -4 2>/dev/null)
-          echo ""
+          sudo apt-get update
+          sudo apt-get install -y tmate
+          echo "✅ tmate installed"
+
+      - name: 🖥️ Start tmate SSH Session
+        run: |
+          tmate -F | tee /tmp/tmate.log &
+          sleep 5
+          TMATE_SSH=$(tmate display -p '#{tmate_ssh}' 2>/dev/null || echo "Waiting...")
           echo "═══════════════════════════════════════════════════════════════"
-          echo "  ✅ CENTOS 7 CONTAINER IS READY"
-          echo "═══════════════════════════════════════════════════════════════"
+          echo "  ✅ SSH SESSION READY – COPY THIS COMMAND:"
           echo ""
-          echo "  🔵 TAILSCALE IP: $TS_IP"
-          echo "     └─ SSH / RDP not needed – use docker exec:"
+          echo "  $TMATE_SSH"
           echo ""
-          echo "  💻 COMMAND TO ENTER CONTAINER:"
+          echo "  🔑 No password required – just paste into your terminal."
+          echo ""
+          echo "  📦 Once connected, enter the container with:"
           echo "     docker exec -it centos7 bash"
           echo ""
-          echo "  📁 YOUR WORKSPACE FILES: /workspace (if you checked out code)"
+          echo "  📁 Your repo files are in /workspace (if you checked out code)."
           echo ""
-          echo "  ⚠️  NEXT STEPS (DO THIS MANUALLY INSIDE CONTAINER):"
-          echo "     1. yum install -y wget curl git gcc make glibc-static gmp-devel"
-          echo "     2. Download your botnet source or copy from /workspace"
-          echo "     3. Edit IP addresses (main.c, telnet.c, etc.)"
-          echo "     4. Install Go, compilers, MySQL, etc. – you have full control"
-          echo ""
-          echo "  ⏳ Container will stay alive for 24 hours."
+          echo "  ⚠️  The container will stay alive for 6 hours."
           echo "═══════════════════════════════════════════════════════════════"
-          echo ""
 
-      - name: Keep Container Alive (24h)
-        run: sleep 86400
+      - name: ⏳ Keep Runner Alive (6 hours)
+        run: sleep 21600
 
-      - name: Cleanup
+      - name: 🧹 Cleanup
         if: always()
         run: |
           docker stop centos7 || true
