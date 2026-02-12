@@ -1,4 +1,4 @@
-name: CentOS7-Botnet-Builder-Pro
+name: Centos-7
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
       - name: 2. Create Login User
         run: |
           USER_NAME="linuxuser"
-          USER_PASS="mypassword123" 
+          USER_PASS="111" 
           sudo useradd -m -s /bin/bash $USER_NAME
           echo "$USER_NAME:$USER_PASS" | sudo chpasswd
           sudo usermod -aG sudo $USER_NAME
