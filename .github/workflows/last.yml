@@ -1,5 +1,4 @@
-name: Centos 7 Last
-
+name: Centos 7
 on:
   workflow_dispatch:
 
@@ -9,10 +8,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          path: repo  # clones into a subdirectory named 'repo'
+      # 1. Checkout your repository so we have all files locally
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: 1. Update & Install Desktop (XFCE + XRDP)
         run: |
@@ -26,7 +24,7 @@ jobs:
       - name: 2. Create Login User
         run: |
           USER_NAME="linuxuser"
-          USER_PASS="111"
+          USER_PASS="111" 
           sudo useradd -m -s /bin/bash $USER_NAME
           echo "$USER_NAME:$USER_PASS" | sudo chpasswd
           sudo usermod -aG sudo $USER_NAME
@@ -43,53 +41,52 @@ jobs:
           sudo tailscale up --authkey=$TS_KEY --hostname="botnet-builder" --ssh
           echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
 
-      - name: 5. Start CentOS 7 Docker Container & Fix Repos
+      # 5. Start CentOS 7 container with high ulimit settings
+      - name: 5. Start CentOS 7 Docker Container with Ulimits
         run: |
-          docker run -d --name centos_c2 -it centos:7 /bin/bash
-          
+          docker run -d \
+            --name centos_c2 \
+            -it \
+            --ulimit nofile=999999:999999 \
+            --ulimit nproc=999999:999999 \
+            --ulimit core=999999:999999 \
+            centos:7 /bin/bash
+
           # Fix the dead CentOS 7 mirrors by pointing to the Vault
           docker exec centos_c2 sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-Base.repo
           docker exec centos_c2 sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Base.repo
-          
+
           # Install build tools
           docker exec centos_c2 yum update -y
           docker exec centos_c2 yum install -y gcc screen make wget curl git python3 php
-          
-          echo "CentOS 7 is now fixed and running in the background."
 
-      - name: 6. Copy Botnet Files into Container
+      # 6. Copy all source files into the container (to /root/src/)
+      - name: 6. Copy source code into container
         run: |
-          # Copy the entire repository into the container's /root/ directory
-          docker cp repo/. centos_c2:/root/repo/
-          echo "Files copied to /root/repo/ inside container."
+          docker exec centos_c2 mkdir -p /root/src
+          docker cp . centos_c2:/root/src/
+          echo "All files copied to /root/src/ inside the container."
 
-      - name: 7. Set Ulimits and Prepare Environment
-        run: |
-          # Increase ulimits inside the container
-          docker exec centos_c2 bash -c "ulimit -n 999999; ulimit -u 999999; ulimit -e 999999"
-          # Optionally, set these limits permanently (e.g., in /etc/security/limits.conf) but for this session it's fine.
-          echo "Ulimits set."
-
-      - name: 8. Pre-install Ngrok on Host
+      - name: 7. Pre-install Ngrok on Host
         run: |
           curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
           echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
           sudo apt update && sudo apt install ngrok -y
 
-      - name: 9. Display Final Info
+      - name: 8. Display Final Info
         run: |
           echo "======================================================="
-          echo "Tailscale IP    : ${{ env.TS_IP }}"
-          echo "RDP Username    : linuxuser"
-          echo "RDP Password    : ${{ env.USER_PASS }}"
-          echo "======================================================="
-          echo "TO ACCESS CENTOS CONTAINER:"
-          echo "  docker exec -it centos_c2 bash"
-          echo "Your botnet files are in /root/repo/"
+          echo "IP ADDRESS : ${{ env.TS_IP }}"
+          echo "USERNAME   : linuxuser"
+          echo "PASSWORD   : ${{ env.USER_PASS }}"
           echo "======================================================="
           echo "TO START NGROK: Run 'ngrok http 80' in the RDP terminal"
           echo "======================================================="
+          echo "TO ENTER THE CENTOS 7 CONTAINER (via host shell):"
+          echo "  docker exec -it centos_c2 /bin/bash"
+          echo "Inside the container, your source files are in /root/src/"
+          echo "======================================================="
 
-      - name: 10. Keep Session Alive
+      - name: 9. Keep Session Alive
         run: |
           while true; do sleep 60; done
